@@ -2,12 +2,8 @@
 <html>
 <head>
     <title>This weeks daily goals</title>
-
     <meta name="description" content="This weeks daily goals">
-    <meta name="author" content="James Bank">
-
     <script src="js/jquery-3.7.1.min.js"></script>
-
     <script>
     $(document).ready(function() {
 
