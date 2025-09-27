@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Weekly Goals Planner</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Generate and print a beautiful weekly goals tracker." />
+  <!-- Bootstrap 5 and jQuery -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- html2pdf.js (bundled: html2canvas + jsPDF) -->
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+  <style>
+    :root{
+      --brand-ink:#0f172a;
+      --brand-muted:#64748b;
+      --brand-accent:#0ea5e9;
+      --ring:#93c5fd;
+    }
+    body{
+      background: linear-gradient(180deg,#f8fafc 0%, #ffffff 100%);
+      color:var(--brand-ink);
+    }
+    .app-header{ padding:2.25rem 0 1rem; }
+    .app-title{ font-weight:800; letter-spacing:.2px; }
+    .app-subtitle{ color:var(--brand-muted); }
+    .card{
+      border:1px solid #e5e7eb;
+      box-shadow: 0 10px 24px rgba(2,6,23,.06);
+      border-radius:1rem;
+    }
+    .btn-accent{ background:var(--brand-accent); color:white; border:none; }
+    .btn-accent:hover{ filter:brightness(.95); }
+    .goal-row input[type="text"]{ border-radius:.75rem; }
+    .drag-handle{ cursor:grab; color:#94a3b8; }
+    .table thead th{
+      background:#f1f5f9;
+      position:sticky; top:0; z-index:1;
+      white-space:nowrap;
+    }
+    .day-cell{ width:11%; text-align:center; vertical-align:middle; }
+    .goal-name{ width:37%; }
+    .notes-card h6{
+      color:var(--brand-muted); font-weight:700;
+      text-transform:uppercase; letter-spacing:.08em;
+    }
+    .form-text.small-muted{ color:var(--brand-muted); }
+    .form-check-input:focus{
+      outline:2px solid transparent;
+      box-shadow:0 0 0 .25rem var(--ring);
+    }
+    .print-actions{
+      position:sticky; bottom:0; background:#fff;
+      border-top:1px solid #e5e7eb; padding:.75rem; z-index:2;
+    }
+    /* Print (hint landscape) */
+    @media print{
+      .no-print{ display:none !important; }
+      body{ background:#fff; }
+      .card{ box-shadow:none; border:none; }
+      .planner h2{ margin:0 0 .25rem 0; }
+      @page{ size: landscape; margin: 10mm; }
+      .day-cell{ padding:.35rem .25rem !important; }
+      .table td, .table th{ border-color:#cbd5e1 !important; }
+      .notes-card textarea{ border:1px solid #cbd5e1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header container">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+      <div>
+        <h1 class="app-title h2 mb-1">Weekly Goals Planner</h1>
+        <p class="app-subtitle mb-0">Create a beautiful, printable habit tracker for the week.</p>
+      </div>
+      <!-- Removed Load Last / Save Draft; kept Reset -->
+      <div class="no-print d-flex flex-wrap gap-2">
+        <button id="btnReset" class="btn btn-outline-danger">Reset</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container pb-5">
+    <!-- Builder -->
+    <section class="no-print">
+      <div class="card p-3 p-md-4 mb-4">
+        <form id="builder" novalidate>
+          <div class="row g-3 align-items-end">
+            <div class="col-md-5">
+              <label for="weeklyName" class="form-label fw-semibold">Weekly goals name</label>
+              <input type="text" id="weeklyName" class="form-control form-control-lg" placeholder="e.g., Wellness, Productivity, Chores" required>
+              <div class="form-text small-muted">Appears as the title on your printable sheet.</div>
+            </div>
+            <div class="col-md-4">
+              <label for="weekStart" class="form-label fw-semibold">Week starting (Mon–Sun)</label>
+              <input type="date" id="weekStart" class="form-control form-control-lg" required>
+              <div class="form-text small-muted">Pick the Monday for this week (auto-fills to this week).</div>
+            </div>
+            <div class="col-md-3 text-md-end">
+              <button id="btnGenerate" type="button" class="btn btn-accent btn-lg w-100">
+                Generate Planner
+              </button>
+            </div>
+          </div>
+
+          <hr class="my-4">
+
+          <div class="d-flex align-items-center justify-content-between">
+            <h5 class="mb-0">Goals</h5>
+            <div class="d-flex gap-2">
+              <button id="btnAddGoal" type="button" class="btn btn-outline-primary">+ Add goal</button>
+              <button id="btnAddBatch" type="button" class="btn btn-outline-secondary" title="Add a quick batch (example)">+ Add example set</button>
+            </div>
+          </div>
+
+          <div id="goalsWrap" class="mt-3">
+            <!-- dynamic goal rows -->
+          </div>
+
+          <div class="mt-3">
+            <div class="form-text small-muted">
+              Tip: drag with the handle to reorder. Use the trash icon to remove a row.
+            </div>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Planner Output -->
+    <section id="plannerSection" class="planner">
+      <div class="card p-3 p-md-4">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <div>
+            <h2 id="plannerTitle" class="h3 mb-1">This Week’s Goals</h2>
+            <div id="plannerDates" class="text-muted"></div>
+          </div>
+          <!-- No print/export buttons here -->
+        </div>
+
+        <div class="table-responsive mt-3" id="plannerCapture">
+          <table class="table table-bordered align-middle">
+            <thead>
+              <tr>
+                <th class="goal-name">Daily Habits</th>
+                <th class="day-cell" id="d0">Mon</th>
+                <th class="day-cell" id="d1">Tue</th>
+                <th class="day-cell" id="d2">Wed</th>
+                <th class="day-cell" id="d3">Thu</th>
+                <th class="day-cell" id="d4">Fri</th>
+                <th class="day-cell" id="d5">Sat</th>
+                <th class="day-cell" id="d6">Sun</th>
+              </tr>
+            </thead>
+            <tbody id="plannerBody">
+              <!-- generated rows -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="row g-3 mt-2 notes-card">
+          <div class="col-md-6">
+            <h6 class="mb-2">Things I did well</h6>
+            <textarea class="form-control" rows="6" placeholder="Celebrate your wins…"></textarea>
+          </div>
+          <div class="col-md-6">
+            <h6 class="mb-2">Things to improve next week</h6>
+            <textarea class="form-control" rows="6" placeholder="What to tweak or focus on…"></textarea>
+          </div>
+        </div>
+
+        <!-- Sticky bottom action bar -->
+        <div class="no-print print-actions mt-3 d-flex flex-wrap justify-content-end gap-2">
+          <button id="btnExportPdf" class="btn btn-outline-primary">Export PDF (Landscape)</button>
+          <button id="btnExportAndPrint" class="btn btn-primary">Export PDF & Print</button>
+          <button id="btnPrint" class="btn btn-outline-secondary">Print (Landscape)</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <template id="goalRowTmpl">
+    <div class="goal-row row g-2 align-items-center mb-2" role="listitem" aria-label="Goal row">
+      <div class="col-1 d-flex justify-content-center">
+        <span class="drag-handle" title="Drag to reorder" aria-hidden="true">☰</span>
+      </div>
+      <div class="col-md-8 col-7">
+        <label class="visually-hidden">Goal name</label>
+        <input type="text" class="form-control form-control-lg goal-input" placeholder="e.g., Walk 30 minutes" required>
+      </div>
+      <div class="col-md-2 col-3">
+        <button type="button" class="btn btn-outline-danger w-100 btnDel" aria-label="Remove goal">🗑 Remove</button>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    // -------- Helpers
+    const $wrap = $("#goalsWrap");
+    const rowTmpl = () => $($(document.getElementById('goalRowTmpl').content).clone(true));
+
+    function getMonday(d){
+      const date = new Date(d);
+      const day = (date.getDay()+6)%7; // 0=Mon … 6=Sun
+      date.setDate(date.getDate() - day);
+      date.setHours(0,0,0,0);
+      return date;
+    }
+    function fmt(d){
+      return d.toLocaleDateString(undefined,{month:'short', day:'numeric'});
+    }
+    function weekDates(startDate){
+      const arr = [];
+      for(let i=0;i<7;i++){
+        const d = new Date(startDate);
+        d.setDate(startDate.getDate()+i);
+        arr.push(d);
+      }
+      return arr;
+    }
+    function serialize(){
+      return {
+        name: $("#weeklyName").val().trim(),
+        weekStart: $("#weekStart").val(),
+        goals: $(".goal-input").map((_,el)=>$(el).val().trim()).get().filter(Boolean)
+      };
+    }
+
+    // -------- Rows
+    function addRow(val=""){
+      const $row = rowTmpl();
+      $row.find(".goal-input").val(val);
+      $wrap.append($row);
+    }
+
+    // Simple drag-sort (no jQuery UI)
+    let dragging = null;
+    $wrap.on("pointerdown",".drag-handle",function(e){
+      dragging = $(this).closest(".goal-row")[0];
+      dragging.setPointerCapture(e.pointerId);
+    });
+    $wrap.on("pointermove",function(e){
+      if(!dragging) return;
+      const rows = Array.from($wrap.children(".goal-row"));
+      const y = e.clientY;
+      for(const r of rows){
+        const rect = r.getBoundingClientRect();
+        if(y < rect.top + rect.height/2){
+          if(r !== dragging) $wrap[0].insertBefore(dragging, r);
+          return;
+        }
+      }
+      $wrap.append(dragging);
+    });
+    $wrap.on("pointerup", ()=> dragging=null);
+
+    $wrap.on("click",".btnDel",function(){
+      $(this).closest(".goal-row").remove();
+    });
+
+    $("#btnAddGoal").on("click", ()=> addRow());
+    $("#btnAddBatch").on("click", ()=>{
+      ["Vitamins","Walk 30 minutes","Read 20 minutes","Deep work (1 hr)","Shower / skincare"].forEach(addRow);
+    });
+
+    // -------- Defaults (this Monday)
+    (function initDefaults(){
+      const today = new Date();
+      const mon = getMonday(today);
+      const iso = mon.toISOString().slice(0,10);
+      $("#weekStart").val(iso);
+      addRow(); addRow();
+    })();
+
+    // -------- Planner generation
+    function renderPlanner(data){
+      const name = data.name || "Weekly";
+      $("#plannerTitle").text(`This Week’s ${name} Goals`);
+
+      const start = new Date(data.weekStart || new Date());
+      const monday = getMonday(start);
+      const dates = weekDates(monday);
+      dates.forEach((d,i)=> $("#d"+i).text(d.toLocaleDateString(undefined,{weekday:'short'})+"\n"+fmt(d)));
+      $("#plannerDates").text(`${fmt(dates[0])} – ${fmt(dates[6])}`);
+
+      const $tbody = $("#plannerBody").empty();
+      (data.goals||[]).forEach(goal=>{
+        const $tr = $("<tr/>");
+        $tr.append(`<td class="goal-name fw-semibold">${$("<div>").text(goal).html()}</td>`);
+        for(let i=0;i<7;i++){
+          $tr.append(`<td class="day-cell"><input class="form-check-input" type="checkbox" aria-label="Mark complete"></td>`);
+        }
+        $tbody.append($tr);
+      });
+    }
+
+    $("#btnGenerate").on("click", function(){
+      const s = serialize();
+      if(!s.name){ $("#weeklyName")[0].focus(); return; }
+      if(!s.weekStart){ $("#weekStart")[0].focus(); return; }
+      if(s.goals.length===0){ addRow(); $(".goal-input").last()[0].focus(); return; }
+      renderPlanner(s);
+      window.scrollTo({top: document.getElementById("plannerSection").offsetTop - 12, behavior:"smooth"});
+    });
+
+    // -------- Reset (kept)
+    $("#btnReset").on("click", ()=>{
+      if(confirm("Clear the form and planner?")){
+        location.reload();
+      }
+    });
+
+    // -------- Print (Landscape)
+    $("#btnPrint").on("click", ()=> window.print());
+
+    // -------- Export to PDF (Landscape) via html2pdf.js
+    function getPdfFileName(){
+      const name = ($("#weeklyName").val().trim() || "Weekly");
+      const week = ($("#weekStart").val() || new Date().toISOString().slice(0,10));
+      return `${name.replace(/\s+/g,'_')}_${week}_planner.pdf`;
+    }
+
+    async function exportPlannerPDF(autoPrint=false){
+      const captureEl = document.getElementById("plannerCapture");
+      // Ensure planner is rendered before export
+      if($("#plannerBody tr").length === 0){
+        $("#btnGenerate").trigger("click");
+      }
+
+      const filename = getPdfFileName();
+      const opt = {
+        margin:       [10, 10, 10, 10],
+        filename,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true, letterRendering: true, windowWidth: document.body.scrollWidth },
+        jsPDF:        { unit: 'pt', format: 'letter', orientation: 'landscape' }
+      };
+
+      const worker = html2pdf().set(opt).from(captureEl).toPdf();
+
+      if(!autoPrint){
+        await worker.save(); // download
+      } else {
+        const pdf = await worker.get('pdf');
+        const blob = pdf.output('blob');
+        const url  = URL.createObjectURL(blob);
+        const w = window.open(url);
+        if(w){
+          const onReady = () => { try { w.focus(); w.print(); } catch(e){} };
+          w.addEventListener('load', onReady);
+          setTimeout(()=>{ try { w.focus(); w.print(); } catch(e){} }, 1200);
+        } else {
+          // Popup blocked: fall back to download
+          const a = document.createElement('a');
+          a.href = url; a.download = filename;
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url);
+          alert('Popup blocked by the browser. The PDF was downloaded instead. You can open it and print in landscape.');
+        }
+      }
+    }
+
+    $("#btnExportPdf").on("click", ()=> exportPlannerPDF(false));
+    $("#btnExportAndPrint").on("click", ()=> exportPlannerPDF(true));
+  </script>
+</body>
+</html>
